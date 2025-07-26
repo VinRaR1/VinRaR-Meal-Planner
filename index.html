@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>High-Protein Meal Planner</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <!-- React & Babel CDN -->
+    <script crossorigin src="https://unpkg.com/react@17/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@17/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Application code -->
+    <script type="text/babel">
+      // High-Protein Meal Planner
+      // NOTE: Future enhancement: Integrate TensorFlow.js model to rank and personalise meal options based on feedback (see TODO below).
+
+      const { useState, useEffect } = React;
+
+      /*********************** CONSTANT DATA ***************************/
+      const FOOD_ITEMS = [
+        { name: "Egg Whites", type: "non-vegetarian", protein: 11, carbs: 1, fat: 0, fiber: 0, calories: 52, vitamins: ["B2", "B12"], minerals: ["Selenium"] },
+        { name: "Whole Eggs", type: "non-vegetarian", protein: 13, carbs: 1, fat: 11, fiber: 0, calories: 155, vitamins: ["A", "B12", "D"], minerals: ["Iron", "Zinc"] },
+        { name: "Chicken Breast", type: "non-vegetarian", protein: 31, carbs: 0, fat: 3.6, fiber: 0, calories: 165, vitamins: ["B6"], minerals: ["Phosphorus"] },
+        { name: "Turkey Breast", type: "non-vegetarian", protein: 29, carbs: 0, fat: 1, fiber: 0, calories: 135, vitamins: ["B3"], minerals: ["Selenium"] },
+        { name: "Lean Beef (90%)", type: "non-vegetarian", protein: 26, carbs: 0, fat: 10, fiber: 0, calories: 217, vitamins: ["B12"], minerals: ["Iron", "Zinc"] },
+        { name: "Salmon", type: "non-vegetarian", protein: 20, carbs: 0, fat: 13, fiber: 0, calories: 208, vitamins: ["D"], minerals: ["Potassium"] },
+        { name: "Shrimp", type: "non-vegetarian", protein: 24, carbs: 0.2, fat: 0.3, fiber: 0, calories: 99, vitamins: ["B12"], minerals: ["Selenium"] },
+        { name: "Whey Protein Powder", type: "vegetarian", protein: 80, carbs: 8, fat: 6, fiber: 0, calories: 412, vitamins: ["B2"], minerals: ["Calcium"] },
+        { name: "Low-Fat Paneer", type: "vegetarian", protein: 21, carbs: 3, fat: 2, fiber: 0, calories: 120, vitamins: ["A"], minerals: ["Calcium"] },
+        { name: "Tofu (firm)", type: "vegetarian", protein: 17, carbs: 3, fat: 8, fiber: 2, calories: 144, vitamins: ["K"], minerals: ["Iron"] },
+        { name: "Tempeh", type: "vegetarian", protein: 20, carbs: 9, fat: 11, fiber: 2, calories: 193, vitamins: ["B6"], minerals: ["Magnesium"] },
+        { name: "Lentils (cooked)", type: "vegetarian", protein: 9, carbs: 20, fat: 0.4, fiber: 8, calories: 116, vitamins: ["B1"], minerals: ["Iron"] },
+        { name: "Black Beans (cooked)", type: "vegetarian", protein: 9, carbs: 23, fat: 0.5, fiber: 8, calories: 132, vitamins: ["B9"], minerals: ["Magnesium"] },
+        { name: "Chickpeas (cooked)", type: "vegetarian", protein: 9, carbs: 27, fat: 3, fiber: 8, calories: 164, vitamins: ["B9"], minerals: ["Iron"] },
+        { name: "Greek Yogurt (non-fat)", type: "vegetarian", protein: 10, carbs: 3.6, fat: 0.4, fiber: 0, calories: 59, vitamins: ["B2"], minerals: ["Calcium"] },
+        { name: "Cottage Cheese (low-fat)", type: "vegetarian", protein: 11, carbs: 3, fat: 4, fiber: 0, calories: 98, vitamins: ["B12"], minerals: ["Sodium"] },
+        { name: "Quinoa (cooked)", type: "vegetarian", protein: 4.4, carbs: 21, fat: 1.9, fiber: 2.8, calories: 120, vitamins: ["E"], minerals: ["Manganese"] },
+        { name: "Oats (dry)", type: "vegetarian", protein: 13, carbs: 68, fat: 7, fiber: 10, calories: 389, vitamins: ["B1"], minerals: ["Magnesium"] },
+        { name: "Almond Butter", type: "vegetarian", protein: 21, carbs: 19, fat: 50, fiber: 12, calories: 614, vitamins: ["E"], minerals: ["Magnesium"] },
+        { name: "Edamame", type: "vegetarian", protein: 12, carbs: 8.9, fat: 5.2, fiber: 5.2, calories: 121, vitamins: ["K"], minerals: ["Iron"] }
+      ];
+
+      const PROTEIN_TARGET_DAILY = 200;
+      const MEAL_TARGETS = {
+        breakfast: { min: 60, max: 75 },
+        lunch: { min: 60, max: 75 },
+        dinner: { min: 60, max: 75 }
+      };
+
+      /*********************** HELPER UTILITIES ***************************/
+      const randomBetween = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+      const containsKeyword = (text, keywords) => keywords.some((k) => text.includes(k.toLowerCase()));
+
+      function computeNutrition(ingredients) {
+        return ingredients.reduce(
+          (acc, { item, grams }) => {
+            const factor = grams / 100;
+            acc.protein += item.protein * factor;
+            acc.carbs += item.carbs * factor;
+            acc.fat += item.fat * factor;
+            acc.fiber += item.fiber * factor;
+            acc.calories += item.calories * factor;
+            item.vitamins.forEach((v) => acc.vitamins.add(v));
+            item.minerals.forEach((m) => acc.minerals.add(m));
+            return acc;
+          },
+          {
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            fiber: 0,
+            calories: 0,
+            vitamins: new Set(),
+            minerals: new Set()
+          }
+        );
+      }
+
+      function filterAllowedItems(profile) {
+        const { dietaryPreference, allergies = [], intolerances = [], dislikes = "" } = profile;
+        let items = FOOD_ITEMS.filter((f) => (dietaryPreference === "vegetarian" ? f.type === "vegetarian" : true));
+
+        const allergyKeywords = allergies.map((a) => a.toLowerCase());
+        const intoleranceKeywords = intolerances.map((i) => i.toLowerCase());
+        const dislikeKeywords = dislikes.split(/,|;/).map((d) => d.trim().toLowerCase()).filter(Boolean);
+
+        items = items.filter((item) => {
+          const nameLower = item.name.toLowerCase();
+          if (containsKeyword(nameLower, allergyKeywords)) return false;
+          if (containsKeyword(nameLower, intoleranceKeywords)) return false;
+          if (containsKeyword(nameLower, dislikeKeywords)) return false;
+          return true;
+        });
+
+        return items.length > 0 ? items : FOOD_ITEMS; // fallback if empty
+      }
+
+      function generateMealOption(targetRange, allowedItems) {
+        for (let i = 0; i < 100; i++) {
+          const ingredients = [];
+          const count = randomBetween(2, 4);
+          const chosen = [];
+          while (chosen.length < count) {
+            const item = allowedItems[randomBetween(0, allowedItems.length - 1)];
+            if (!chosen.includes(item)) chosen.push(item);
+          }
+          chosen.forEach((item) => {
+            const grams = item.protein > 25 ? randomBetween(60, 120) : randomBetween(120, 250);
+            ingredients.push({ item, grams });
+          });
+          const nutrition = computeNutrition(ingredients);
+          if (nutrition.protein >= targetRange.min && nutrition.protein <= targetRange.max) {
+            return {
+              ingredients,
+              macros: {
+                protein: Math.round(nutrition.protein),
+                carbs: Math.round(nutrition.carbs),
+                fat: Math.round(nutrition.fat),
+                fiber: Math.round(nutrition.fiber),
+                calories: Math.round(nutrition.calories)
+              },
+              vitamins: Array.from(nutrition.vitamins),
+              minerals: Array.from(nutrition.minerals),
+              prepTime: randomBetween(10, 25),
+              instructions: ingredients
+                .map(({ item, grams }) => {
+                  const verbs = item.type === "non-vegetarian" ? ["Grill", "Bake", "Pan-sear"] : ["Boil", "Stir-fry", "Mix"];
+                  const verb = verbs[randomBetween(0, verbs.length - 1)];
+                  return `${verb} ${grams}g of ${item.name}.`;
+                })
+                .join(" ")
+            };
+          }
+        }
+        // fallback shake
+        const whey = allowedItems.find((f) => f.name === "Whey Protein Powder") || FOOD_ITEMS.find((f) => f.name === "Whey Protein Powder");
+        const grams = 100;
+        const nutrition = computeNutrition([{ item: whey, grams }]);
+        return {
+          ingredients: [{ item: whey, grams }],
+          macros: {
+            protein: Math.round(nutrition.protein),
+            carbs: Math.round(nutrition.carbs),
+            fat: Math.round(nutrition.fat),
+            fiber: Math.round(nutrition.fiber),
+            calories: Math.round(nutrition.calories)
+          },
+          vitamins: Array.from(nutrition.vitamins),
+          minerals: Array.from(nutrition.minerals),
+          prepTime: 2,
+          instructions: `Blend ${grams}g of Whey Protein Powder with water.`
+        };
+      }
+
+      function generateMealPlans(profile) {
+        const allowedItems = filterAllowedItems(profile);
+        const meals = {};
+        Object.entries(MEAL_TARGETS).forEach(([mealKey, targetRange]) => {
+          const options = Array.from({ length: 3 }, () => generateMealOption(targetRange, allowedItems));
+          meals[mealKey] = options;
+        });
+        return meals;
+      }
+
+      /*********************** COMPONENTS ***************************/
+      function Header() {
+        return (
+          <header>
+            <div className="container">
+              <h1>High-Protein Meal Planner</h1>
+            </div>
+          </header>
+        );
+      }
+
+      function ProfileForm({ onGenerate, currentProfile }) {
+        const initialState = currentProfile || {
+          age: "",
+          weight: "",
+          height: "",
+          activityLevel: "sedentary",
+          dietaryPreference: "non-vegetarian",
+          allergies: [],
+          intolerances: [],
+          dislikes: ""
+        };
+
+        const [form, setForm] = useState(initialState);
+        const [errors, setErrors] = useState({});
+
+        // Update form when currentProfile changes
+        useEffect(() => {
+          if (currentProfile) {
+            setForm(currentProfile);
+          }
+        }, [currentProfile]);
+
+        const allergensList = ["nuts", "dairy", "shellfish"];
+        const intolerancesList = ["gluten", "lactose", "soy"];
+
+        const handleChange = (e) => {
+          const { name, value, type, checked } = e.target;
+          if (type === "checkbox") {
+            setForm((prev) => {
+              const list = prev[name];
+              return { ...prev, [name]: checked ? [...list, value] : list.filter((v) => v !== value) };
+            });
+          } else {
+            setForm((prev) => ({ ...prev, [name]: value }));
+          }
+        };
+
+        const validate = () => {
+          const newErrors = {};
+          ["age", "weight", "height"].forEach((field) => {
+            if (!form[field]) newErrors[field] = "Required";
+          });
+          if (!form.activityLevel) newErrors.activityLevel = "Required";
+          if (!form.dietaryPreference) newErrors.dietaryPreference = "Required";
+          setErrors(newErrors);
+          return Object.keys(newErrors).length === 0;
+        };
+
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          if (validate()) onGenerate(form);
+        };
+
+        return (
+          <section className="profile-form container" aria-label="User Profile Form">
+            <h2 className="mb-8">Create Your Profile</h2>
+            <form onSubmit={handleSubmit}>
+              <div className="form-row">
+                {[
+                  { label: "Age", name: "age", type: "number" },
+                  { label: "Weight (kg)", name: "weight", type: "number" },
+                  { label: "Height (cm)", name: "height", type: "number" }
+                ].map(({ label, name, type }) => (
+                  <div key={name}>
+                    <label className="form-label" htmlFor={name}>{label}</label>
+                    <input id={name} name={name} type={type} className="form-control" value={form[name]} onChange={handleChange} />
+                    {errors[name] && <small className="status status--error">{errors[name]}</small>}
+                  </div>
+                ))}
+              </div>
+
+              <div className="form-row mt-8">
+                <div>
+                  <label className="form-label" htmlFor="activityLevel">Activity Level</label>
+                  <select id="activityLevel" name="activityLevel" className="form-control" value={form.activityLevel} onChange={handleChange}>
+                    <option value="sedentary">Sedentary</option>
+                    <option value="light">Lightly Active</option>
+                    <option value="moderate">Moderately Active</option>
+                    <option value="very">Very Active</option>
+                  </select>
+                </div>
+                <div>
+                  <span className="form-label">Dietary Preference</span>
+                  <div className="flex gap-8 mt-8">
+                    {[
+                      { label: "Non-Vegetarian", value: "non-vegetarian" },
+                      { label: "Vegetarian", value: "vegetarian" }
+                    ].map(({ label, value }) => (
+                      <label key={value}>
+                        <input type="radio" name="dietaryPreference" value={value} checked={form.dietaryPreference === value} onChange={handleChange} /> {label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="form-row mt-8">
+                <div>
+                  <span className="form-label">Allergies</span>
+                  {allergensList.map((a) => (
+                    <label key={a} style={{ display: "block" }}>
+                      <input type="checkbox" name="allergies" value={a} checked={form.allergies.includes(a)} onChange={handleChange} /> {a}
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <span className="form-label">Intolerances</span>
+                  {intolerancesList.map((i) => (
+                    <label key={i} style={{ display: "block" }}>
+                      <input type="checkbox" name="intolerances" value={i} checked={form.intolerances.includes(i)} onChange={handleChange} /> {i}
+                    </label>
+                  ))}
+                </div>
+                <div>
+                  <label className="form-label" htmlFor="dislikes">Dislikes (comma separated)</label>
+                  <input id="dislikes" name="dislikes" className="form-control" value={form.dislikes} onChange={handleChange} />
+                </div>
+              </div>
+
+              <button className="btn btn--primary mt-8" type="submit">Generate Plan</button>
+            </form>
+          </section>
+        );
+      }
+
+      function OptionCard({ option, onChoose, onSwap }) {
+        return (
+          <div className="option-card">
+            <div className="option-header">
+              <h4>Option</h4>
+              <div className="flex gap-8">
+                <button className="btn btn--outline btn--sm" onClick={onSwap}>Swap</button>
+                <button className="btn btn--primary btn--sm" onClick={onChoose}>Choose</button>
+              </div>
+            </div>
+            <p className="mt-8"><strong>Ingredients:</strong> {option.ingredients.map(({ item, grams }) => `${grams}g ${item.name}`).join(", ")}</p>
+            <table className="nutrition-table mt-8">
+              <thead><tr><th>Protein</th><th>Carbs</th><th>Fat</th><th>Fiber</th><th>Calories</th></tr></thead>
+              <tbody><tr><td>{option.macros.protein}</td><td>{option.macros.carbs}</td><td>{option.macros.fat}</td><td>{option.macros.fiber}</td><td>{option.macros.calories}</td></tr></tbody>
+            </table>
+            <p className="mt-8"><strong>Prep Time:</strong> {option.prepTime} min</p>
+            <p className="mt-8"><strong>Preparation:</strong> {option.instructions}</p>
+            <div className="mt-8">
+              {option.vitamins.map((v) => <span key={v} className="badge">{v}</span>)}
+              {option.minerals.map((m) => <span key={m} className="badge">{m}</span>)}
+            </div>
+          </div>
+        );
+      }
+
+      function MealPlanDisplay({ mealPlans, onSwap, onChoose }) {
+        return (
+          <section className="container" aria-label="Meal Plan Display">
+            <h2 className="mb-8">Your Meal Plan</h2>
+            {Object.keys(mealPlans).map((mealKey) => (
+              <details key={mealKey} className="meal-card" open>
+                <summary>
+                  <h3 style={{ margin: 0, textTransform: "capitalize" }}>{mealKey}</h3>
+                  <span>▼</span>
+                </summary>
+                {mealPlans[mealKey].map((option, idx) => (
+                  <OptionCard key={idx} option={option} onChoose={() => onChoose(mealKey, option)} onSwap={() => onSwap(mealKey, idx)} />
+                ))}
+              </details>
+            ))}
+          </section>
+        );
+      }
+
+      function ProgressTracker({ protein }) {
+        const percent = Math.min(100, Math.round((protein / PROTEIN_TARGET_DAILY) * 100));
+        return (
+          <section className="container">
+            <h2 className="mb-8">Daily Protein Intake</h2>
+            <div className="progress-container" role="progressbar" aria-valuenow={protein} aria-valuemin="0" aria-valuemax={PROTEIN_TARGET_DAILY}>
+              <div className="progress-bar" style={{ width: `${percent}%` }}></div>
+            </div>
+            <p className="mt-8">{protein} g / {PROTEIN_TARGET_DAILY} g</p>
+          </section>
+        );
+      }
+
+      function LoggedMeals({ loggedMeals, onUndo }) {
+        return (
+          <section className="container logged-meals">
+            <h2 className="mb-8">Logged Meals</h2>
+            {loggedMeals.length === 0 ? <p>No meals logged yet.</p> : null}
+            {loggedMeals.map((entry, idx) => (
+              <div key={idx} className="logged-meal">
+                <span>{entry.mealKey} – {entry.option.macros.protein} g protein</span>
+                <button className="btn btn--outline btn--sm" onClick={() => onUndo(idx)}>Undo</button>
+              </div>
+            ))}
+          </section>
+        );
+      }
+
+      function FeedbackModal({ visible, onClose, onSubmit }) {
+        const [rating, setRating] = useState(0);
+        const [comment, setComment] = useState("");
+
+        useEffect(() => {
+          if (visible) {
+            setRating(0);
+            setComment("");
+          }
+        }, [visible]);
+
+        if (!visible) return null;
+
+        const handleSubmit = (e) => {
+          e.preventDefault();
+          onSubmit({ rating, comment });
+        };
+
+        return (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Rate Your Meal</h3>
+              <form onSubmit={handleSubmit}>
+                <div className="star-group">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <span key={n} className={`star ${rating >= n ? "selected" : ""}`} onClick={() => setRating(n)}>★</span>
+                  ))}
+                </div>
+                <textarea className="form-control" placeholder="Comments (optional)" value={comment} onChange={(e) => setComment(e.target.value)}></textarea>
+                <div className="flex justify-end gap-8 mt-8">
+                  <button type="button" className="btn btn--secondary btn--sm" onClick={onClose}>Close</button>
+                  <button type="submit" className="btn btn--primary btn--sm" disabled={rating === 0}>Submit</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      }
+
+      /*********************** MAIN APP ***************************/
+      function App() {
+        const [profile, setProfile] = useState(null);
+        const [mealPlans, setMealPlans] = useState(null);
+        const [loggedMeals, setLoggedMeals] = useState([]);
+        const [proteinConsumed, setProteinConsumed] = useState(0);
+        const [showModal, setShowModal] = useState(false);
+        const [pendingFeedback, setPendingFeedback] = useState(null);
+        const [feedbacks, setFeedbacks] = useState([]);
+
+        const handleGenerate = (formData) => {
+          const plans = generateMealPlans(formData);
+          setProfile(formData);
+          setMealPlans(plans);
+          setLoggedMeals([]);
+          setProteinConsumed(0);
+        };
+
+        const handleSwap = (mealKey, optionIndex) => {
+          setMealPlans((prev) => {
+            const newPlans = { ...prev };
+            const allowedItems = filterAllowedItems(profile);
+            const newOption = generateMealOption(MEAL_TARGETS[mealKey], allowedItems);
+            newPlans[mealKey] = newPlans[mealKey].map((opt, idx) => (idx === optionIndex ? newOption : opt));
+            return newPlans;
+          });
+        };
+
+        const handleChoose = (mealKey, option) => {
+          setLoggedMeals((prev) => [...prev, { mealKey, option }]);
+          setProteinConsumed((prev) => prev + option.macros.protein);
+          setPendingFeedback({ mealKey, option });
+          setShowModal(true);
+        };
+
+        const handleUndo = (idx) => {
+          setLoggedMeals((prev) => {
+            const removed = prev[idx];
+            setProteinConsumed((p) => p - removed.option.macros.protein);
+            return prev.filter((_, i) => i !== idx);
+          });
+        };
+
+        const handleFeedbackSubmit = ({ rating, comment }) => {
+          setFeedbacks((prev) => [...prev, { ...pendingFeedback, rating, comment }]);
+          setShowModal(false);
+        };
+
+        return (
+          <main>
+            <Header />
+            <ProfileForm onGenerate={handleGenerate} currentProfile={profile} />
+            {mealPlans && (
+              <>
+                <ProgressTracker protein={proteinConsumed} />
+                <MealPlanDisplay mealPlans={mealPlans} onSwap={handleSwap} onChoose={handleChoose} />
+                <LoggedMeals loggedMeals={loggedMeals} onUndo={handleUndo} />
+              </>
+            )}
+            <FeedbackModal visible={showModal} onClose={() => setShowModal(false)} onSubmit={handleFeedbackSubmit} />
+          </main>
+        );
+      }
+
+      // TODO: Integrate TensorFlow.js model here to rank/craft meals based on collected feedbacks.
+
+      ReactDOM.render(React.createElement(App), document.getElementById("root"));
+    </script>
+  </body>
+</html>
